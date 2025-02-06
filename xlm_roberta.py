@@ -131,7 +131,7 @@ class XLMRobertaForToxicReasoning(XLMRobertaPreTrainedModel):
                 return None
             mask = labels != -100
             out, lbl = out[mask].view(mask.sum()), labels[mask].float().view(mask.sum())
-            return out, self.bce_loss_fct(out, lbl)
+            return self.bce_loss_fct(out, lbl)
 
         def apply_ce(out, labels):
             if labels is None:

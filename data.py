@@ -348,9 +348,14 @@ def load_data(train_data_loc, test_data_loc, cached_data_loc, tokenizer, comment
             for key, dataset in tokenized_datasets.items():
                 dataset.save_to_disk(os.path.join(cached_data_loc, key))
 
+    _train = tokenized_datasets['train'].shuffle(seed=0)
+    tokenized_datasets['dev'] = _train.select(range(500))
+    tokenized_datasets['train'] = _train.select(range(500, len(_train)))
+
+    dev_dataloader = DataLoader(tokenized_datasets['dev'], batch_size=batch_size, collate_fn=_collate)
     train_dataloader = DataLoader(tokenized_datasets['train'], shuffle=True, batch_size=batch_size, collate_fn=_collate)
     eval_dataloader = DataLoader(tokenized_datasets['test'], batch_size=batch_size, collate_fn=_collate)
-    return train_dataloader, eval_dataloader
+    return train_dataloader, dev_dataloader, eval_dataloader
 
 
 if __name__ == '__main__':
