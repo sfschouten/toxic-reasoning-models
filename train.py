@@ -8,36 +8,54 @@ import wandb
 from tqdm import tqdm
 
 from data import load_data
+
+# from modern_bert import ModernBertForToxicReasoning
 from xlm_roberta import XLMRobertaForToxicReasoning
-
-
-LR = 5e-5
-NUM_EPOCHS = 30
-NUM_WARMUP_STEPS = 0
+NUM_EPOCHS = 6
+MAX_NO_IMPROVEMENT = 999  # disabled
+FRAC_WARMUP_STEPS = 0.1
 DATA_DIR = {
     # 'eval': '../data/temporal/raw_eval_data/all/',
     'test': '../data/temporal/preprocessed_test.pkl',
     # 'train': '../git-repo/local_outputs/gpt4o_combined/',
     'train': '../data/temporal/preprocessed_train.pkl',
 }
-CACHE_DIR = 'cache/'
+CACHE_DIR = 'cache-xlm-roberta-base/'
+# CACHE_DIR = 'cache-modernbert/'
 
-MODEL = "FacebookAI/xlm-roberta-base"
-# BATCH_SIZE = 16
-BATCH_SIZE = 32
-# BATCH_SIZE = 64
-ACC_STEPS = 2
-CLASSIFIER_DROPOUT = 0.5
+# WEIGHT_KEY = "FacebookAI/xlm-roberta-base"
+WEIGHT_KEY = "FacebookAI/xlm-roberta-large"
+# WEIGHT_KEY = "answerdotai/ModernBERT-large"
+
+DTYPE = torch.bfloat16
+
+CLASSIFIER_DROPOUT = 0.1
+
+# BATCH_SIZE = 8 #16
+# BATCH_SIZE = 32
+BATCH_SIZE = 64
+ACC_STEPS = 1
+
+BASE_LR = 3e-5
+HEADS_LR = 5e-3
+
+BASE_WD = 0.01
+HEADS_WD = 0
+
+
 COMMENT_TOKEN = "<COMMENT>"
+# COMMENT_TOKEN = "[unused0]"
 
 device, _, _ = get_backend()  # automatically detects the underlying device type (CUDA, CPU, XPU, MPS, etc.)
 
 # Instantiate model
-tokenizer = AutoTokenizer.from_pretrained(MODEL)
+tokenizer = AutoTokenizer.from_pretrained(WEIGHT_KEY)
 tokenizer.add_special_tokens({'additional_special_tokens': [COMMENT_TOKEN]})
 
-# base_model = XLMRobertaForToxicReasoning.from_pretrained(MODEL, device_map=device)
-model = XLMRobertaForToxicReasoning.from_pretrained(MODEL, device_map=device, classifier_dropout=CLASSIFIER_DROPOUT)
+model = XLMRobertaForToxicReasoning.from_pretrained(
+# model = ModernBertForToxicReasoning.from_pretrained(
+    WEIGHT_KEY, device_map=device, classifier_dropout=CLASSIFIER_DROPOUT, torch_dtype=DTYPE,
+)
 model.further_init(tokenizer.vocab[COMMENT_TOKEN])
 
 # Load data
@@ -49,17 +67,25 @@ train_dataloader, dev_dataloader, test_dataloader = load_data(
 
 # Training loop
 
-optimizer = AdamW(model.parameters(), lr=LR)
+optimizer = AdamW([
+    {'params': model.roberta.parameters(), 'lr': 5e-5, 'weight_decay': 0.01},
+    # {'params': model.model.parameters(), 'lr': 5e-5, 'weight_decay': 0.01},
+    {'params': model.cls.parameters(), 'lr': 1e-3, 'weight_decay': 0.0}
+])
 
 num_training_steps = NUM_EPOCHS * len(train_dataloader) // ACC_STEPS
+num_warmup_steps = int(num_training_steps * FRAC_WARMUP_STEPS)
 lr_scheduler = get_scheduler(
-    name='linear', optimizer=optimizer, num_warmup_steps=NUM_WARMUP_STEPS, num_training_steps=num_training_steps
+    name='linear', optimizer=optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps
 )
 
 
 run = wandb.init(
     project="xlm-roberta-toxic-reasoning",
-    config={"learning_rate": LR, "epochs": NUM_EPOCHS, "classifier_dropout": CLASSIFIER_DROPOUT},
+    config={
+        "weights": WEIGHT_KEY,
+        "base-lr": BASE_LR, "heads-lr": HEADS_LR, "epochs": NUM_EPOCHS, "classifier_dropout": CLASSIFIER_DROPOUT
+    },
 )
 
 
@@ -103,8 +129,8 @@ for epoch in range(NUM_EPOCHS):
         best_epoch_loss = total_dev_loss
         model.save_pretrained('./saved_model/')
         last_improvement = epoch
-    elif last_improvement + 5 == epoch:  # the last time we improved was 5 epochs ago
-        print('No improvement for 5 epochs, calling it.')
+    elif last_improvement + MAX_NO_IMPROVEMENT == epoch:
+        print(f'No improvement for {MAX_NO_IMPROVEMENT} epochs, calling it.')
         break
 
     run.log({f"dev_loss_total": total_dev_loss / len(dev_dataloader)})

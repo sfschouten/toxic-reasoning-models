@@ -272,7 +272,7 @@ def _collate(batch):
 
 
 def load_data(train_data_loc, test_data_loc, cached_data_loc, tokenizer, comment_token, batch_size, sample_cap=-1,
-              use_cache=True, write_cache=True, dump_intermediates=False):
+              use_cache=True, write_cache=True, dump_intermediates=False, max_length=500):
     data_dirs = {'train': train_data_loc, 'test': test_data_loc}
     cache_dirs = {key: os.path.join(cached_data_loc, key) for key in data_dirs.keys()}
 
@@ -285,14 +285,14 @@ def load_data(train_data_loc, test_data_loc, cached_data_loc, tokenizer, comment
             by_comment_data = {key: df.sort_values('st_id').iloc[-sample_cap:] for key, df in by_comment_data.items()}
 
         by_thread_df = {
-            key: _create_thread_text(_preprocess(df), tokenizer, comment_token)
+            key: _create_thread_text(_preprocess(df), tokenizer, comment_token, max_length=max_length)
             for key, df in by_comment_data.items()
         }
 
         datasets = {key: Dataset.from_pandas(df) for key, df in by_thread_df.items()}
 
         def tokenize_func(examples):
-            tokenized = tokenizer(examples["text"], padding="max_length")
+            tokenized = tokenizer(examples["text"], padding="max_length", max_length=max_length)
 
             updated_labels = {}
             token_level_cols = {key: examples['label_' + key] for key, col in COLUMNS.items() if col.type == 'ml-tokens'}

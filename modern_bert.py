@@ -1,9 +1,11 @@
+from dataclasses import dataclass
 from typing import Optional
 
 import torch
 import torch.nn as nn
 
 from transformers import XLMRobertaPreTrainedModel, XLMRobertaModel
+from transformers.utils import ModelOutput
 
 
 class XLMRobertaClassificationHead(nn.Module):
@@ -24,6 +26,11 @@ class XLMRobertaClassificationHead(nn.Module):
         x = self.dropout(x)
         x = self.out_proj(x)
         return x
+
+
+@dataclass
+class ToxicReasoningOutput(ModelOutput):
+    loss: torch.FloatTensor = None
 
 
 class XLMRobertaForToxicReasoning(XLMRobertaPreTrainedModel):
