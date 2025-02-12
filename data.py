@@ -101,7 +101,6 @@ COLUMNS = {
     'expertBelief': Column(type='mc', map=ORDINALS, empty_value=0.5)
 }
 
-
 ANSWER_HIERARCHY = \
     ColumnSet(columns=('toxicity',), condition=1, children=(
         ColumnSet(columns=('justInappropriate',), condition=0, children=(
@@ -196,17 +195,20 @@ Post Text: {post_text}
 
         message_counts = [0]
         message_strs = [""]
-        cols = ['author_name', 'comment_body']
-        for i, (author, comment_body) in enumerate(st_df[cols].itertuples(index=False)):
+        message_ids = [[]]
+        cols = ['st_nr', 'comment_id', 'author_name', 'comment_body']
+        for i, (st_nr, comment_id, author, comment_body) in enumerate(st_df[cols].itertuples(index=False)):
             msg = comment_token + f"Message {i + 1} (by {author}):\n```\n{comment_body}\n```\n\n"
 
             if len(tokenizer.encode(start_str + message_strs[-1] + msg)) > max_length:
                 # adding the current comment would make the existing message too long, add a new empty message
                 message_strs.append("")
                 message_counts.append(0)
+                message_ids.append([])
 
             message_strs[-1] += msg
             message_counts[-1] += 1
+            message_ids[-1].append((st_nr, comment_id))
 
         if len(message_strs) > 1:
             nr_long_msgs += 1
@@ -227,6 +229,7 @@ Post Text: {post_text}
 
             new_row = row.copy()
             new_row['text'] = start_str + msg_str
+            new_row['ids'] = message_ids[i]
 
             if len(tokenizer.encode(new_row['text'])) > max_length:
                 nr_skip_msgs += 1
@@ -288,6 +291,7 @@ def load_data(train_data_loc, test_data_loc, cached_data_loc, tokenizer, comment
             key: _create_thread_text(_preprocess(df), tokenizer, comment_token, max_length=max_length)
             for key, df in by_comment_data.items()
         }
+        by_thread_df = {key: df.drop(columns=['ids']) for key, df in by_thread_df.items()}
 
         datasets = {key: Dataset.from_pandas(df) for key, df in by_thread_df.items()}
 
