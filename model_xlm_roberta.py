@@ -31,7 +31,7 @@ class XLMRobertaForToxicReasoning(XLMRobertaPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.comment_token_id = None
-        self.roberta = XLMRobertaModel(config, add_pooling_layer=False)
+        self.model = XLMRobertaModel(config, add_pooling_layer=False)
 
         classifier_dropout = (
             config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
@@ -46,12 +46,12 @@ class XLMRobertaForToxicReasoning(XLMRobertaPreTrainedModel):
             'hasImplication':       XLMRobertaClassificationHead(config, 1),
             'subject':              XLMRobertaClassificationHead(config, 5),
             'subjectGroupType':     XLMRobertaClassificationHead(config, 15),
-            'subject_token':        nn.Linear(config.hidden_size, 1),
+            'subjectTokens':        nn.Linear(config.hidden_size, 1),
             'hasOther':             XLMRobertaClassificationHead(config, 1),
             'other':                XLMRobertaClassificationHead(config, 5),
-            'other_token':          nn.Linear(config.hidden_size, 1),
+            'otherTokens':          nn.Linear(config.hidden_size, 1),
             'implTopic':            XLMRobertaClassificationHead(config, 7),
-            'implTopic_token':      nn.Linear(config.hidden_size, 1),
+            'implTopicTokens':      nn.Linear(config.hidden_size, 1),
             'implPolarity':         XLMRobertaClassificationHead(config, 3),
             'implTemporality':      XLMRobertaClassificationHead(config, 3),
             'implStereotype':       XLMRobertaClassificationHead(config, 1),
@@ -72,12 +72,13 @@ class XLMRobertaForToxicReasoning(XLMRobertaPreTrainedModel):
 
     def further_init(self, comment_token_id):
         self.comment_token_id = comment_token_id
-        if comment_token_id >= self.roberta.embeddings.word_embeddings.num_embeddings:
+        if comment_token_id >= self.model.embeddings.word_embeddings.num_embeddings:
             # comment token has no embedding, so add one
-            self.roberta.resize_token_embeddings(self.comment_token_id + 1)
-            s_embedding = self.roberta.embeddings.word_embeddings.weight[self.config.bos_token_id].detach().clone()
+            print(f'WARNING: randomly initializing embedding for {comment_token_id}.')
+            self.model.resize_token_embeddings(self.comment_token_id + 1)
+            s_embedding = self.model.embeddings.word_embeddings.weight[self.config.bos_token_id].detach().clone()
             with torch.no_grad():
-                self.roberta.embeddings.word_embeddings.weight[self.comment_token_id] = s_embedding
+                self.model.embeddings.word_embeddings.weight[self.comment_token_id] = s_embedding
 
     def forward(
             self,
@@ -109,7 +110,7 @@ class XLMRobertaForToxicReasoning(XLMRobertaPreTrainedModel):
         if self.comment_token_id is None:
             raise ValueError("Still needs further initialization (call `further_init`).")
 
-        outputs = self.roberta(input_ids, attention_mask=attention_mask)
+        outputs = self.model(input_ids, attention_mask=attention_mask)
         sequence_output = outputs[0]
         sequence_output = self.dropout(sequence_output)
 
@@ -136,14 +137,14 @@ class XLMRobertaForToxicReasoning(XLMRobertaPreTrainedModel):
 
             (k := 'subject'): (out := self.cls[k](comment_repr).squeeze(), apply_ce(out, label_subject)),
             (k := 'subjectGroupType'): (out := self.cls[k](comment_repr), masked_bce(out, label_subjectGroupType)),
-            (k := 'subject_token'): ((out := self.cls[k](sequence_output)), masked_bce(out, label_subjectTokens)),
+            (k := 'subjectTokens'): ((out := self.cls[k](sequence_output)), masked_bce(out, label_subjectTokens)),
 
             (k := 'hasOther'): (out := self.cls[k](comment_repr), masked_bce(out, label_hasOther)),
             (k := 'other'): (out := self.cls[k](comment_repr).squeeze(), apply_ce(out, label_other)),
-            (k := 'other_token'): (out := self.cls[k](sequence_output), masked_bce(out, label_otherTokens)),
+            (k := 'otherTokens'): (out := self.cls[k](sequence_output), masked_bce(out, label_otherTokens)),
 
             (k := 'implTopic'): (out := self.cls[k](comment_repr).squeeze(), apply_ce(out, label_implTopic)),
-            (k := 'implTopic_token'): (out := self.cls[k](sequence_output), masked_bce(out, label_implTopicTokens)),
+            (k := 'implTopicTokens'): (out := self.cls[k](sequence_output), masked_bce(out, label_implTopicTokens)),
             (k := 'implPolarity'): (out := self.cls[k](comment_repr).squeeze(), apply_ce(out, label_implPolarity)),
 
             (k := 'implTemporality'): (out := self.cls[k](comment_repr), masked_bce(out, label_implTemporality)),

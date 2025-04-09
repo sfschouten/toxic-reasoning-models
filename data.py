@@ -15,6 +15,8 @@ from datasets import load_from_disk
 
 import torch
 
+from structure import ImplicationCategory
+
 
 pd.set_option('future.no_silent_downcasting', True)
 
@@ -33,13 +35,23 @@ def _raw_data(loc):
 @dataclass
 class ColumnSet:
     columns: tuple = None
-    condition: int = None
+    conditions: tuple = None
     children: tuple = ()
+    parent: "ColumnSet" = None
 
-    def descendent_values(self):
+    def __post_init__(self):
+        for child in self.children:
+            child.parent = self
+
+    def ancestor_values(self):
+        yield from self.columns
+        if self.parent is not None:
+            yield from self.parent.ancestor_values()
+
+    def descendant_values(self):
         yield from self.columns
         for child in self.children:
-            yield from child.descendent_values()
+            yield from child.descendant_values()
 
 
 @dataclass
@@ -61,8 +73,10 @@ class Column:
     def reverse_map(self):
         if self.map is not None:
             return {val: key for key, val in self.map.items()}
-        else:
+        elif self._values is not None:
             return {i: v for i, v in enumerate(self._values)}
+        else:
+            return None
 
 
 GROUP_MAP = {
@@ -101,20 +115,43 @@ COLUMNS = {
     'expertBelief': Column(type='mc', map=ORDINALS, empty_value=0.5)
 }
 
+IMPL_TOPIC_MAP = {
+    '(a)': 'the subject’s circumstances, living conditions, physical condition or health, general wellbeing, '
+           'access to resources, etc.',
+    '(a.1)': "some kind of harm coming to the subject",
+    '(b)': "the subject’s (inherent) qualities, their nature, abilities, etc.",
+    '(b.1)': "dehumanisation of the subject",
+    '(c)': "the subject’s choices/decisions, lifestyle, beliefs, etc.",
+    '(d)': "a non-specific comparison (does not fall under other categories) between the subject and the other",
+    '(e)': "unclear or none of the above",
+}
+
+
 ANSWER_HIERARCHY = \
-    ColumnSet(columns=('toxicity',), condition=1, children=(
-        ColumnSet(columns=('justInappropriate',), condition=0, children=(
-            ColumnSet(columns=('hasImplication',), condition=1, children=(
-                ColumnSet(columns=('subject', 'subjectGroupType', 'subjectTokens')),  # 'subjectGroup',
-                ColumnSet(columns=('hasOther',), condition=1, children=(
-                    ColumnSet(columns=('other', 'otherTokens')),  # 'otherGroup',
-                )),
-                ColumnSet(columns=('implTopic', 'implTopicTokens', 'implPolarity', 'implTemporality', 'implStereotype')),
-                ColumnSet(columns=('authorBelief', 'authorPrefer', 'authorAccount',
-                                   'typicalBelief', 'typicalPrefer', 'expertBelief')),
-            )),
+    ColumnSet(columns=('toxicity', 'counternarrative', 'justInappropriate', 'hasImplication'),
+              conditions=(1, 0, 0, 1), children=(
+        ColumnSet(columns=('subject', 'subjectGroupType', 'subjectTokens')),  # 'subjectGroup',
+        ColumnSet(columns=('hasOther',), conditions=(1,), children=(
+            ColumnSet(columns=('other', 'otherTokens')),  # 'otherGroup',
         )),
+        ColumnSet(columns=('implTopic', 'implTopicTokens', 'implPolarity', 'implTemporality', 'implStereotype')),
+        ColumnSet(columns=('authorBelief', 'authorPrefer', 'authorAccount',
+                           'typicalBelief', 'typicalPrefer', 'expertBelief')),
     ))
+
+
+def hierarchy_lookup():
+    result = {c: ANSWER_HIERARCHY for c in ANSWER_HIERARCHY.columns}
+    stack = [ANSWER_HIERARCHY]
+    while stack:
+        node = stack.pop()
+        result |= {col: node for col in node.columns}
+        for child in node.children:
+            stack.append(child)
+    return result
+
+
+HIERARCHY_LOOKUP = hierarchy_lookup()
 
 
 def _preprocess(df):
@@ -131,10 +168,40 @@ def _preprocess(df):
 
         df[col.replace('answer', 'answer_pp')] = df[col].apply(process)
 
-    df['answer_pp_implTopic'] = df['answer_pp_implTopic'].str.extract(r'^(?:\.\.\.\s)?(\(..?.?\))')
+    # normalize implication field
+    if 'answer_implication' not in df.columns:
+        # TODO check if this makes sense (still) ??
+        df['answer_pp_implication'] = df['answer_pp_englishImplication']
 
+    # normalize implTopic field
+    df['answer_pp_implTopic'] = df['answer_implTopic'].str.extract(r'^(?:\.\.\.\s)?(\(..?.?\))')
+    df['answer_pp_implTopic2'] = df['answer_implTopic'].str.extract(r'^(?:\.\.\.\s)?(?:\(..?.?\))\s(.*)')
+    df.loc[df['answer_pp_implTopic'] == '(b)', 'answer_pp_implTopic2'] = ImplicationCategory.b.value
+    df.loc[df['answer_pp_implTopic'] == '(d)', 'answer_pp_implTopic2'] = ImplicationCategory.d.value
+
+    # add column that infers if people filled out beyond the first few questions
+    features = [
+        # df['answer_pp_implication'].str.len() > 0,
+        df['answer_pp_implTopic'].isin(COLUMNS['implTopic'].values),
+        df['answer_pp_implPolarity'].isin(COLUMNS['implPolarity'].values),
+        df['answer_pp_implTemporality'].apply(lambda x: x is not None and len(x) > 0),
+        df['answer_pp_implStereotype'].isin(COLUMNS['implStereotype'].values),
+        df['answer_pp_implSarcasm'].isin(COLUMNS['implSarcasm'].values),
+    ]
+    implPct: pd.Series = sum((f.astype(float) for f in features), start=0) / len(features)
+    # implPct.plot.hist(bins=20)
+    df['answer_pp_implDetected'] = implPct > 0.5
+
+    # empty multi-label fields where there is no implication
+    df.loc[~df['answer_pp_implDetected'], [
+        'answer_pp_subjectGroupType', 'answer_pp_subjectTokens', 'answer_pp_hasOther',
+        'answer_pp_otherTokens', 'answer_pp_implTopicTokens', 'answer_pp_implTemporality'
+    ]] = pd.NA
+
+    # assign empty labels where answers are missing
     def ml_func(values, members):
-        return [int(v in members) for v in values] if members is not None else [-100 for _ in values]
+        nn_members = members is not None and hasattr(members, '__contains__')
+        return [int(v in members) for v in values] if nn_members else [-100 for _ in values]
 
     for col in COLUMNS.keys():
         if COLUMNS[col].type == 'mc':
@@ -147,26 +214,42 @@ def _preprocess(df):
                 lambda row: ml_func(row.iloc[1].split(), row.iloc[0]), axis=1
             )
 
-    # zero out columns where appropriate
+    # zero out labels where appropriate
     stack = [ANSWER_HIERARCHY]
     while stack:
         node = stack.pop()
         for child in node.children:
             stack.append(child)
 
-            empty = reduce(lambda a, b: a | b, [df.loc[:, 'label_' + col] != node.condition for col in node.columns])
-            for col in child.descendent_values():
+            empty = reduce(lambda a, b: a | b, [df.loc[:, 'label_' + col] != condition
+                           for col, condition in zip(node.columns, node.conditions)])
+            for col in child.descendant_values():
                 if COLUMNS[col].type == 'mc':
                     df.loc[empty, 'label_' + col] = -100
+                    # df.loc[empty, 'answer_pp_' + col] = pd.NA
                 elif COLUMNS[col].type == 'ml':
                     df.loc[empty, 'label_' + col] = pd.Series([[-100] * len(COLUMNS[col].values)]).repeat(empty.sum()).values
+                    # df.loc[empty, 'answer_pp_' + col] = pd.NA
                 elif COLUMNS[col].type == 'ml-tokens':
                     df.loc[empty, 'label_' + col] = df.loc[empty, 'comment_body_tokens'].apply(lambda x: [-100] * len(x.split()))
+                    # df.loc[empty, 'answer_pp_' + col] = pd.NA
 
     return df
 
 
-def _create_thread_text(comments_df, tokenizer, comment_token, add_post_text=False, max_length=500):
+DEFAULT_POST_TEMPLATE = """\
+From a thread in r/{subreddit}
+
+Post Title: {post_title}
+Post Text: {post_text}
+
+"""
+
+DEFAULT_MESSAGE_TEMPLATE = "Message {message_nr} (by {author}):\n```\n{comment_body}\n```{comment_token}\n\n"
+
+
+def comtok_create_thread_text(comments_df, tokenizer, comment_token, add_post_text=False, max_length=500,
+                              post_template=DEFAULT_POST_TEMPLATE, message_template=DEFAULT_MESSAGE_TEMPLATE):
     nr_long_msgs = 0
     nr_skip_msgs = 0
 
@@ -184,13 +267,7 @@ def _create_thread_text(comments_df, tokenizer, comment_token, add_post_text=Fal
         else:
             post_text = 'HIDDEN'
 
-        start_str = f"""\
-From a thread in r/{subreddit}
-
-Post Title: {post_title}
-Post Text: {post_text}
-
-"""
+        start_str = post_template.format(subreddit=subreddit, post_title=post_title, post_text=post_text)
         st_df = st_df.sort_values('st_nr')
 
         message_counts = [0]
@@ -198,7 +275,8 @@ Post Text: {post_text}
         message_ids = [[]]
         cols = ['st_nr', 'comment_id', 'author_name', 'comment_body']
         for i, (st_nr, comment_id, author, comment_body) in enumerate(st_df[cols].itertuples(index=False)):
-            msg = comment_token + f"Message {i + 1} (by {author}):\n```\n{comment_body}\n```\n\n"
+            msg = message_template.format(message_nr=i+1, author=author, comment_body=comment_body,
+                                          comment_token=comment_token)
 
             if len(tokenizer.encode(start_str + message_strs[-1] + msg)) > max_length:
                 # adding the current comment would make the existing message too long, add a new empty message
@@ -239,6 +317,9 @@ Post Text: {post_text}
             end = start + message_counts[i]
 
             for key, col in COLUMNS.items():
+                if 'label_' + key not in st_df.columns:
+                    continue
+
                 by_comment = st_df.iloc[start:end]['label_' + key].tolist()
                 if col.type in ['mc', 'ml']:
                     new_row['label_' + key] = by_comment
@@ -248,8 +329,14 @@ Post Text: {post_text}
                         assert len(c) == count_words(st_df.iloc[start + i]['comment_body'], True)
                     # token-level annotations should be merged to thread-level
                     labels = ([-100] * start_nr_words) + sum((([-100] * 5) + c + [-100] for c in by_comment), start=[])
-                    # assert len(labels) == count_words(new_row['text'], False)
                     new_row['label_' + key] = labels
+
+            if 'label_subjectTokens' in st_df.columns:
+                comments = ([-100] * start_nr_words) + sum((
+                    ([-100] * 5) + [i] * len(c) + [-100]
+                    for i, c in enumerate(st_df.iloc[start:end]['label_subjectTokens'].tolist())
+                ), start=[])
+                new_row['comment_i'] = comments
             new_rows.append(new_row)
         result.extend(new_rows)
 
@@ -258,7 +345,7 @@ Post Text: {post_text}
     return pd.DataFrame(result)
 
 
-def _collate(batch):
+def comtok_collate(batch):
     DEFAUlT_COLS = ['input_ids', 'attention_mask']
     TOKEN_COLS = ['label_subjectTokens', 'label_otherTokens', 'label_implTopicTokens']
     collated = default_collate([{col: torch.tensor(row[col]) for col in DEFAUlT_COLS + TOKEN_COLS} for row in batch])
@@ -274,8 +361,45 @@ def _collate(batch):
     return collated
 
 
-def load_data(train_data_loc, test_data_loc, cached_data_loc, tokenizer, comment_token, batch_size, sample_cap=-1,
-              use_cache=True, write_cache=True, dump_intermediates=False, max_length=500):
+def convert_word_to_token_level(encoding, text, word_label, is_boolean=True):
+    words = re.split(r'(\s+)', text)
+    char2word = sum(([i // 2 if i % 2 == 0 else -1] * len(w) for i, w in enumerate(words)), start=[])
+    char_label = [word_label[j] if (j := char2word[i]) != -1 else -1 for i, _ in enumerate(text)]
+    char_label[-1] = char_label[-1] if char_label[-1] != -1 else 0
+    if is_boolean:
+        char_label = [l if l > -1 else (char_label[i - 1] == char_label[i + 1] == 1) for i, l in enumerate(char_label)]
+
+    token_label = []
+    for token_idx, id in enumerate(encoding.ids):  # loop over tokens
+        char_idxs = encoding.token_to_chars(token_idx)
+        if char_idxs is None:
+            token_label.append(-100)
+            continue
+        char_lbl = [char_label[ci] for ci in range(*char_idxs)]
+        label = int(Counter(char_lbl).most_common(1)[0][0])
+        token_label.append(label)
+    return token_label
+
+
+def comtok_tokenize_func(examples, tokenizer, max_length, include_labels=True, **tokenizer_kwargs):
+    tokenized = tokenizer(examples["text"], padding="max_length", max_length=max_length, **tokenizer_kwargs)
+    # tokenized = tokenizer(examples["text"], padding="longest", max_length=max_length, **tokenizer_kwargs)
+
+    updated_labels = {}
+    if include_labels:
+        token_level_cols = {key: examples['label_' + key] for key, col in COLUMNS.items() if col.type == 'ml-tokens'}
+
+        for key, col in token_level_cols.items():
+            updated_labels['label_' + key] = [
+                convert_word_to_token_level(enc, text, word_label)
+                for enc, text, word_label in zip(tokenized.encodings, examples['text'], col)
+            ]
+
+    return {**tokenized, **updated_labels}
+
+
+def comtok_load_data(train_data_loc, test_data_loc, cached_data_loc, tokenizer, comment_token, batch_size, sample_cap=-1,
+                     use_cache=True, write_cache=True, dump_intermediates=False, max_length=500):
     data_dirs = {'train': train_data_loc, 'test': test_data_loc}
     cache_dirs = {key: os.path.join(cached_data_loc, key) for key in data_dirs.keys()}
 
@@ -288,42 +412,13 @@ def load_data(train_data_loc, test_data_loc, cached_data_loc, tokenizer, comment
             by_comment_data = {key: df.sort_values('st_id').iloc[-sample_cap:] for key, df in by_comment_data.items()}
 
         by_thread_df = {
-            key: _create_thread_text(_preprocess(df), tokenizer, comment_token, max_length=max_length)
+            key: comtok_create_thread_text(_preprocess(df), tokenizer, comment_token, max_length=max_length)
             for key, df in by_comment_data.items()
         }
         by_thread_df = {key: df.drop(columns=['ids']) for key, df in by_thread_df.items()}
-
         datasets = {key: Dataset.from_pandas(df) for key, df in by_thread_df.items()}
-
-        def tokenize_func(examples):
-            tokenized = tokenizer(examples["text"], padding="max_length", max_length=max_length)
-
-            updated_labels = {}
-            token_level_cols = {key: examples['label_' + key] for key, col in COLUMNS.items() if col.type == 'ml-tokens'}
-            for key, col in token_level_cols.items():
-                updated = []
-                for enc, text, word_label in zip(tokenized.encodings, examples['text'], col):
-                    words = re.split(r'(\s+)', text)
-                    char2word = sum(([i // 2 if i % 2 == 0 else -1] * len(w) for i, w in enumerate(words)), start=[])
-                    char_label = [word_label[j] if (j := char2word[i]) != -1 else -1 for i, _ in enumerate(text)]
-                    char_label[-1] = char_label[-1] if char_label[-1] != -1 else 0
-                    char_label = [l if l > -1 else (char_label[i-1] == char_label[i+1] == 1) for i, l in enumerate(char_label)]
-
-                    token_label = []
-                    for token_idx, id in enumerate(enc.ids):                # loop over tokens
-                        char_idxs = enc.token_to_chars(token_idx)
-                        if char_idxs is None:
-                            token_label.append(-100)
-                            continue
-                        char_lbl = [char_label[ci] for ci in range(*char_idxs)]
-                        label = int(Counter(char_lbl).most_common(1)[0][0])
-                        token_label.append(label)
-                    updated.append(token_label)
-                updated_labels['label_' + key] = updated
-
-            return {**tokenized, **updated_labels}
-
-        tokenized_datasets = {key: dataset.map(tokenize_func, batched=True) for key, dataset in datasets.items()}
+        tok_func = partial(comtok_tokenize_func, tokenizer=tokenizer, max_length=max_length)
+        tokenized_datasets = {key: dataset.map(tok_func, batched=True) for key, dataset in datasets.items()}
 
         if dump_intermediates:
             lines = []
@@ -356,9 +451,9 @@ def load_data(train_data_loc, test_data_loc, cached_data_loc, tokenizer, comment
     tokenized_datasets['dev'] = _train.select(range(500))
     tokenized_datasets['train'] = _train.select(range(500, len(_train)))
 
-    dev_dataloader = DataLoader(tokenized_datasets['dev'], batch_size=batch_size, collate_fn=_collate)
-    train_dataloader = DataLoader(tokenized_datasets['train'], shuffle=True, batch_size=batch_size, collate_fn=_collate)
-    eval_dataloader = DataLoader(tokenized_datasets['test'], batch_size=batch_size, collate_fn=_collate)
+    dev_dataloader = DataLoader(tokenized_datasets['dev'], batch_size=batch_size, collate_fn=comtok_collate)
+    train_dataloader = DataLoader(tokenized_datasets['train'], shuffle=True, batch_size=batch_size, collate_fn=comtok_collate)
+    eval_dataloader = DataLoader(tokenized_datasets['test'], batch_size=batch_size, collate_fn=comtok_collate)
     return train_dataloader, dev_dataloader, eval_dataloader
 
 
@@ -370,7 +465,7 @@ if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained("FacebookAI/xlm-roberta-base")
     tokenizer.add_special_tokens({'additional_special_tokens': [COMMENT_TOKEN]})
 
-    load_data(
+    comtok_load_data(
         DATA_DIR['train'], DATA_DIR['test'], 'cache/',
         tokenizer, COMMENT_TOKEN,
         8, sample_cap=25, use_cache=False, write_cache=False, dump_intermediates=True
