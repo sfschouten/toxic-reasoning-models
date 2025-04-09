@@ -85,7 +85,7 @@ class ToxicReasoningPipeline(Pipeline):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.model.further_init(tokenizer.vocab['<COMMENT>'])
+        self.model.further_init(self.tokenizer.vocab['<COMMENT>'])
 
     def _sanitize_parameters(self, **kwargs):
         preprocess_kwargs = {}
