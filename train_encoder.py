@@ -7,10 +7,10 @@ from accelerate.test_utils.testing import get_backend
 import wandb
 from tqdm import tqdm
 
-from data import comtok_load_data
+from models.data import comtok_load_data
 
 # from model_xlm_roberta import XLMRobertaForToxicReasoning
-from model_eurobert import EuroBertForToxicReasoning
+from models.model_eurobert import EuroBertForToxicReasoning
 
 
 NUM_EPOCHS = 6

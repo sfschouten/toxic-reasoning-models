@@ -15,7 +15,7 @@ from datasets import load_from_disk
 
 import torch
 
-from structure import ImplicationCategory
+from models.structure import ImplicationCategory
 
 
 pd.set_option('future.no_silent_downcasting', True)

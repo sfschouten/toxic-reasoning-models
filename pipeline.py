@@ -13,7 +13,7 @@ from transformers import Pipeline, AutoTokenizer
 
 from models.model_eurobert import EuroBertForToxicReasoning
 
-from data import COLUMNS, comtok_create_thread_text, comtok_tokenize_func
+from models.data import COLUMNS, comtok_create_thread_text, comtok_tokenize_func
 
 
 DEFAULT_COMTOK_THRESHOLDS = MappingProxyType({

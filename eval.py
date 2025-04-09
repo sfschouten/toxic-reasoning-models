@@ -1,4 +1,3 @@
-import sys
 import warnings
 from functools import partial
 
@@ -6,7 +5,7 @@ import pandas as pd
 from tqdm import tqdm
 from sklearn.metrics import classification_report
 
-from data import COLUMNS
+from models.data import COLUMNS
 
 
 def get_random_baseline(class_counts, baseline_type):
