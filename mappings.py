@@ -63,12 +63,12 @@ def latent_hatred(prediction, attitude_thresholds=LATENT_HATRED_THRESHOLD_DEFAUL
 
 def edos(prediction, attitude_thresholds=LATENT_HATRED_THRESHOLD_DEFAULTS):
 
-    if prediction['toxicity'] == 'No':
-        return [NOT_TOXIC]
-    if prediction['justInappropriate'] == 'Yes':
-        return [JUST_INAPPROPRIATE]
-    if prediction['hasImplication'] == "['_Different kind of toxicity']":
-        return [DIFFERENT_KIND]
+    # if prediction['toxicity'] == 'No':
+    #     return [NOT_TOXIC]
+    # if prediction['justInappropriate'] == 'Yes':
+    #     return [JUST_INAPPROPRIATE]
+    # if prediction['hasImplication'] == "['_Different kind of toxicity']":
+    #     return [DIFFERENT_KIND]
 
     classes = []
     # 1.1 threats of harm
