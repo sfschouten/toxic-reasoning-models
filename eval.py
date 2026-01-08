@@ -144,8 +144,9 @@ def jaccard_sampled(test_df, get_prediction, columns=('subjectTokens', 'otherTok
     result_records = []
     for lang, lang_df in test_df.groupby('lang'):
         for col in columns:
-            for sample_i in tqdm(range(NR_SAMPLES)):
-                _df = lang_df[lang_df['label_hasOther'] == 1] if col == 'otherTokens' else lang_df
+            _df = lang_df[lang_df['label_hasOther'] == 1] if col == 'otherTokens' else lang_df
+            nr_samples = _df.shape[0] if _df.shape[0] < NR_SAMPLES else NR_SAMPLES
+            for sample_i in tqdm(range(nr_samples)):
                 sample_df = _df.groupby('comment_id').sample(n=1)
                 jaccard_scores = sample_df.apply(
                     lambda row: jaccard_index(
@@ -153,7 +154,6 @@ def jaccard_sampled(test_df, get_prediction, columns=('subjectTokens', 'otherTok
                         row[f'answer_pp_{col}'], row[f'label_{col}']
                     ), axis=1, result_type='expand'
                 )
-
                 result = {'lang': lang, 'annotator': '*', 'column': col, 'sample': sample_i,
                           'jaccard': jaccard_scores[0].mean(), 'support': (~jaccard_scores[0].isna()).sum()}
                 result_records.append(result)
@@ -179,7 +179,6 @@ def f1_by_annotator(test_df, get_prediction, columns=('toxicity', 'counternarrat
                 )
                 if result is None:
                     continue
-
                 result_records.extend(result)
 
     results_df = pd.DataFrame.from_records(result_records)

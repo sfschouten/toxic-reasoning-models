@@ -1,55 +1,63 @@
+import json
+
 from functools import partial
 
 from unsloth import FastLanguageModel, is_bfloat16_supported
 
-from trl import SFTTrainer
-from transformers import TrainingArguments
-from datasets import Dataset
+from trl import SFTTrainer, SFTConfig
+from datasets import Dataset, NamedSplit
 
 import pandas as pd
 
 from tqdm import tqdm
 
 from data import _raw_data,  _preprocess, COLUMNS
+from models.structure_to_standard import convert, ANSWER_DEFAULT
 from structure import ThreadReasonings, from_answers_and_labels
+
+import outlines
 
 
 MAX_SEQ_LENGTH = 4096   # Choose any! We auto support RoPE Scaling internally!
 DTYPE = None            # None for auto detection. Float16 for Tesla T4, V100, Bfloat16 for Ampere+
-LOAD_IN_4BIT = True     # Use 4bit quantization to reduce memory usage. Can be False.
 
-MODEL_PATH = "MasterControlAIML/DeepSeek-R1-Qwen-2.5-1.5b-Latest-Unstructured-To-Structured"
+MODEL_PATH = "unsloth/gpt-oss-20b-unsloth-bnb-4bit"
+LOAD_IN_4BIT = True     # Use 4bit quantization to reduce memory usage.
+MODEL_NAME = 'gptoss'
+FULL_TRAIN = False
 
+# MODEL_PATH = "MasterControlAIML/DeepSeek-R1-Qwen-2.5-1.5b-Latest-Unstructured-To-Structured"
+# LOAD_IN_4BIT = False
+# MODEL_NAME = 'qwen'
+# FULL_TRAIN = False
 
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name=MODEL_PATH,
-    max_seq_length=MAX_SEQ_LENGTH,
-    dtype=DTYPE,
-    load_in_4bit=LOAD_IN_4BIT,
-)
+# MODEL_PATH = "google/gemma-3-270m-it"
+# LOAD_IN_4BIT = False
+# MODEL_NAME = 'gemma'
+# FULL_TRAIN = True
 
-model = FastLanguageModel.get_peft_model(
-    model,
-    r=16, # Choose any number > 0 ! Suggested 8, 16, 32, 64, 128
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                    "gate_proj", "up_proj", "down_proj",],
-    lora_alpha=16,
-    lora_dropout=0, # Supports any, but = 0 is optimized
-    bias="none",    # Supports any, but = "none" is optimized
-    # [NEW] "unsloth" uses 30% less VRAM, fits 2x larger batch sizes!
-    use_gradient_checkpointing="unsloth", # True or "unsloth" for very long context
-    random_state=3407,
-    use_rslora=False,  # We support rank stabilized LoRA
-    loftq_config=None, # And LoftQ
-)
-
+MAX_COMMENTS = int(10e9)
+# MAX_COMMENTS = int(1000)
 
 # LOAD DATA
 DATA_DIR = {
     'test': '../data/temporal/preprocessed_test.pkl',
     'train': '../data/temporal/preprocessed_train.pkl',
 }
-eos_token = tokenizer.eos_token
+
+
+def load_model(path=MODEL_PATH, **kwargs):
+    base_model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=path,
+        max_seq_length=MAX_SEQ_LENGTH,
+        dtype=DTYPE,
+        load_in_4bit=LOAD_IN_4BIT,
+        device_map='cuda:0',
+        full_finetuning=FULL_TRAIN,
+        # fast_inference=True
+        **kwargs
+    )
+    return base_model, tokenizer
 
 
 def _create_thread_text(comments_df, tokenizer, comment_token, add_post_text=False, max_length=500):
@@ -127,24 +135,20 @@ Post Text: {post_text}
     return pd.DataFrame(result)
 
 
-by_comment_data = {key: _raw_data(_dir) for key, _dir in DATA_DIR.items()}
-by_comment_data = {key: df.sort_values('st_id').iloc[-1000:] for key, df in by_comment_data.items()}
-
-by_thread_df = {
-    key: _create_thread_text(_preprocess(df), tokenizer, "", max_length=MAX_SEQ_LENGTH/2)
-    for key, df in by_comment_data.items()
-}
-by_thread_df = {key: df.drop(columns=['ids']) for key, df in by_thread_df.items()}
-
-
+SCHEMA = ThreadReasonings.model_json_schema()
 
 SYSTEM_PROMPT = """
 ### Role:
 You are an expert on toxic language, specializing in annotating the explicit or implicit toxicity of messages from social media.
 
+### Blank JSON Schema:
+{SCHEMA}
+"""
+
+FULL_PROMPT = SYSTEM_PROMPT + """
+
 ### DATA INPUT:
-- **Messages:** ```{SAMPLE}```  
-- **Blank JSON Schema:** ```{SCHEMA}```  
+{SAMPLE}
 
 ### TASK REQUIREMENT:
 Analyze the given text and fill out the fields of the provided JSON Schema.
@@ -153,58 +157,131 @@ Analyze the given text and fill out the fields of the provided JSON Schema.
 {RESPONSE}
 """
 
-schema = ThreadReasonings.model_json_schema()
 
-
-def formatting_prompts_func(example):
+def formatting_prompts_func(example, eos_token=None):
     example_dict = example.to_dict()
 
     response_obj = from_answers_and_labels(example_dict)
     response_str = response_obj.json()
-    text = SYSTEM_PROMPT.format(
-        SAMPLE=example_dict['text'],
-        SCHEMA=schema,
-        RESPONSE=response_str
-    ) + eos_token
 
-    return {'text': text}
-
-
-def gen(key):
-    yield from by_thread_df[key].apply(formatting_prompts_func, axis=1)
+    return {
+        'st_id': example_dict['st_id'],
+        'with_answer': FULL_PROMPT.format(
+            SAMPLE=example_dict['text'], SCHEMA=SCHEMA, RESPONSE=response_str
+        ) + eos_token,
+        'question_only': FULL_PROMPT.format(SAMPLE=example_dict['text'], SCHEMA=SCHEMA, RESPONSE="") + eos_token,
+    }
 
 
-datasets = {key: Dataset.from_generator(partial(gen, key)) for key in by_thread_df}
+def data_gen(data, tokenizer):
+    f = partial(formatting_prompts_func, eos_token=tokenizer.eos_token)
+    yield from data.apply(f, axis=1)
 
-# datasets = {key:  for key, dataset in by_thread_df.items()}
-# datasets = {key: dataset.map(formatting_prompts_func, batched=True) for key, dataset in datasets.items()}
 
-#
-trainer = SFTTrainer(
-    model=model,
-    tokenizer=tokenizer,
-    train_dataset=datasets["train"],
-    dataset_text_field="text",
-    max_seq_length=MAX_SEQ_LENGTH,
-    dataset_num_proc=2,
-    packing=False, # Can make training 5x faster for short sequences.
-    args=TrainingArguments(
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=4,
-        warmup_steps=5,
-        # num_train_epochs = 1, # Set this for 1 full training run.
-        max_steps=60,
-        learning_rate=2e-4,
-        fp16=not is_bfloat16_supported(),
-        bf16=is_bfloat16_supported(),
-        logging_steps=1,
-        optim="adamw_8bit",
-        weight_decay=0.01,
-        lr_scheduler_type="linear",
-        seed=3407,
-        output_dir="outputs",
-        report_to="none", # Use this for WandB etc
-    ),
-)
+def predict(model, tokenizer, datasets, by_comment_data, split='test'):
+    struct_model = outlines.from_transformers(model, tokenizer)
+    gen = outlines.Generator(struct_model, ThreadReasonings)
+    # pkv = calc_prefix_cache(inf_model, tokenizer)
 
-trainer_stats = trainer.train()
+    data_by_thread = datasets[split]
+    data_by_comment = by_comment_data[split]
+
+    predictions = {}
+    for i, sample in tqdm(enumerate(data_by_thread)):
+        pred = gen(sample['question_only'])
+
+        # Get relevant comments
+        st_id = sample['st_id']
+        st_df = data_by_comment.loc[data_by_comment['st_id'] == st_id]
+        to_drop = ['id', 'workerid', 'timestamp'] + [k for k in st_df.columns if k.startswith('answer_') or k.startswith('label_')]
+        st_df = st_df.drop(columns=to_drop).drop_duplicates()
+
+        try:
+            pred = json.loads(pred)
+            print(pred)
+            pred_standard = convert(pred, st_df)
+        except:
+            # if something goes wrong, insert empty answers
+            pred_standard = {st_nr: ANSWER_DEFAULT for st_nr in st_df['st_nr']}
+            print('Something went wrong... Using empty/default answers.')
+
+        predictions[st_id] = pred_standard
+
+    return predictions
+
+
+def get_data(tokenizer, max_nr_comments=1000, test_only=False):
+    by_comment_data = {key: _raw_data(_dir) for key, _dir in DATA_DIR.items()}
+    by_comment_data = {
+        key: df.sort_values('st_id').tail(max_nr_comments)
+        for key, df in by_comment_data.items() if not test_only or key == 'test'
+    }
+
+    by_thread_df = {
+        key: _create_thread_text(_preprocess(df), tokenizer, "", max_length=MAX_SEQ_LENGTH//2)
+        for key, df in by_comment_data.items()
+    }
+    by_thread_df = {key: df.drop(columns=['ids']) for key, df in by_thread_df.items()}
+
+    datasets = {
+        key: Dataset.from_generator(
+            partial(data_gen, by_thread_df[key], tokenizer), split=NamedSplit(key)
+        ) for key in by_thread_df
+    }
+
+    return by_comment_data, by_thread_df, datasets
+
+
+if __name__ == '__main__':
+    base_model, tokenizer = load_model()
+    _, _, datasets = get_data(tokenizer, max_nr_comments=MAX_COMMENTS)
+
+    # # dump data for inspection
+    # for key, dataset_df in datasets.items():
+    #     dataset_df.to_csv(f'/tmp/{key}.csv')
+
+    # -------------
+    #  fine-tuning
+    # -------------
+
+    if not FULL_TRAIN:
+        to_train = FastLanguageModel.get_peft_model(
+            base_model,
+            r=64,  # Choose any number > 0 ! Suggested 8, 16, 32, 64, 128
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                            "gate_proj", "up_proj", "down_proj",],
+            lora_alpha=16,
+            lora_dropout=0,  # Supports any, but = 0 is optimized
+            bias="none",     # Supports any, but = "none" is optimized
+            use_gradient_checkpointing="unsloth",  # True or "unsloth" for very long context
+            random_state=3407,
+            use_rslora=True,   # We support rank stabilized LoRA
+            loftq_config=None,  # And LoftQ
+        )
+    else:
+        to_train = base_model
+
+    trainer = SFTTrainer(
+        model=to_train,
+        train_dataset=datasets['train'],
+        args=SFTConfig(
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=16,
+            warmup_steps=30,
+            num_train_epochs=1,  # Set this for 1 full training run.
+            # max_steps=60,
+            learning_rate=2e-4,
+            fp16=not is_bfloat16_supported(),
+            bf16=is_bfloat16_supported(),
+            logging_steps=1,
+            optim="adamw_8bit",
+            weight_decay=0.01,
+            lr_scheduler_type="linear",
+            seed=3407,
+            output_dir=MODEL_NAME,
+            report_to="wandb",  # Use this for WandB etc
+            dataset_text_field='with_answer'
+        ),
+    )
+
+    trainer_stats = trainer.train()
