@@ -785,7 +785,7 @@ class EuroBertForToxicReasoning(EuroBertPreTrainedModel):
         self.comment_token_id = comment_token_id
         if comment_token_id >= self.model.embed_tokens.num_embeddings:
             # comment token has no embedding, so add one
-            print(f'WARNING: randomly initializing embedding for {comment_token_id}.')
+            print(f'WARNING: initializing embedding for {comment_token_id} to <bos>.')
             self.model.resize_token_embeddings(self.comment_token_id + 1)
             s_embedding = self.model.embed_tokens.weight[self.config.bos_token_id].detach().clone()
             with torch.no_grad():
@@ -873,4 +873,4 @@ class EuroBertForToxicReasoning(EuroBertPreTrainedModel):
         losses = {key: value[1] for key, value in preds_and_loss.items()}
         losses['total'] = sum(value for value in losses.values() if value is not None)
 
-        return preds, losses
+        return preds, losses, comment_repr
