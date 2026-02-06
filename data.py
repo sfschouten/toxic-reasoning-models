@@ -134,7 +134,7 @@ ANSWER_HIERARCHY = \
         ColumnSet(columns=('hasOther',), conditions=(1,), children=(
             ColumnSet(columns=('other', 'otherTokens')),  # 'otherGroup',
         )),
-        ColumnSet(columns=('implTopic', 'implTopicTokens', 'implPolarity', 'implTemporality', 'implStereotype')),
+        ColumnSet(columns=('implTopic', 'implTopicTokens', 'implPolarity', 'implTemporality', 'implStereotype', 'implSarcasm')),
         ColumnSet(columns=('authorBelief', 'authorPrefer', 'authorAccount',
                            'typicalBelief', 'typicalPrefer', 'expertBelief')),
     ))
