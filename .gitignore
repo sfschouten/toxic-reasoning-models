@@ -1,0 +1,16 @@
+cache-*/
+saved_*/
+
+
+gemma*/
+gptoss*/
+qwen*/
+
+
+unsloth_compiled_cache/
+
+.ipynb_checkpoints/
+
+*.csv
+
+.~*#
