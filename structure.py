@@ -37,8 +37,8 @@ class ImplicationCategory(str, Enum):
     a = ("the subject's circumstances, living conditions, physical condition or health, general wellbeing, access to "
          "resources, etc.")
     a1 = "some kind of harm coming to the subject"
-    # b = "the subject's (inherent) qualities, their nature, abilities, etc."
-    b = "the subject's nature, inherent qualities or abilities, etc."
+    b = "the subject's (inherent) qualities, their nature, abilities, etc."
+    # b = "the subject's nature, inherent qualities or abilities, etc."
     b1 = "dehumanisation of the subject"
     c = "the subject's choices/decisions, lifestyle, beliefs, etc."
     d = "a non-specific comparison (does not fall under other categories) between the subject and the other"
@@ -65,7 +65,7 @@ class ToxicReasoning(BaseModel):
                     "as a single sentence. Do not describe the implication, but simply make explicit that which is "
                     "implied; i.e. do not start with 'The comment/author implies ...', instead the sentence should "
                     "generally start with the subject and continue with what is implied about the subject. If there "
-                    "is no clear implication do not generate a ToxicReasoning."
+                    "is no clear implication do not generate a ToxicReasoning.",
     )
 
     # SUBJECT
@@ -149,7 +149,7 @@ def from_answers_and_labels(example_dict):
     comment_annotations = []
     for i, toxicity in enumerate(example_dict['label_toxicity']):
         reasoning = None
-        if example_dict['label_hasImplication'][i] == 1:
+        if example_dict['answer_pp_implDetected'][i]:
             subject_charac = GroupCharacteristic.na
             subject_charac_arr = example_dict['answer_pp_subjectGroupType'][i]
             if len(subject_charac_arr) > 0 and subject_charac_arr != ['_other']:
