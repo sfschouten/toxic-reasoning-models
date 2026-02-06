@@ -55,7 +55,15 @@ def get_random_baseline(class_counts, baseline_type):
 def _cls_report(keyvalues, df, predictions, col):
     kwargs = {}
 
-    if COLUMNS[col].type == 'mc':
+    if col not in COLUMNS:
+        print(f'WARNING: {col} not in COLUMNS')
+        references = df[f'answer_pp_{col}']
+        idx = ~references.isna()
+        kwargs['y_true'] = references[idx].astype(str)
+        kwargs['y_pred'] = predictions[idx].astype(str)
+        kwargs['labels'] = pd.concat([references[idx], predictions[idx]]).unique().astype(str)
+        print(f"Detected labels: {kwargs['labels']}")
+    elif COLUMNS[col].type == 'mc':
         references = df[f'answer_pp_{col}']
         idx = ~references.isna()
         kwargs['y_true'] = references[idx].astype(str)
@@ -67,6 +75,9 @@ def _cls_report(keyvalues, df, predictions, col):
         kwargs['y_true'] = references[idx].tolist()
 
         _len = len(references.iat[0])
+        assert predictions.apply(lambda x: not isinstance(x, list) or all(isinstance(i, int) for i in x)).all(), \
+            f"Please supply only list of integers for predictions on 'ml' columns, got: {predictions}"
+
         predictions = predictions.apply(lambda x: [-1] * _len if x == 'NA' else x)
         kwargs['y_pred'] = predictions[idx].apply((lambda x: [float(y) > 0 for y in x])).tolist()
         kwargs['target_names'] = COLUMNS[col].values
@@ -100,10 +111,10 @@ def _cls_report(keyvalues, df, predictions, col):
     return results
 
 
-JACCARD_NONE = 'no_reference'
-JACCARD_EMPTY_REF = 'empty_reference'
-JACCARD_EMPTY_PRED = 'empty_prediction'
-JACCARD_EMPTY_BOTH = 'empty_both'
+ERR_NONE = 'no_reference'
+ERR_EMPTY_REF = 'empty_reference'
+ERR_EMPTY_PRED = 'empty_prediction'
+ERR_EMPTY_BOTH = 'empty_both'
 
 
 def jaccard_index(pred, answer, label):
@@ -112,18 +123,18 @@ def jaccard_index(pred, answer, label):
         pred = {}
 
     if not hasattr(answer, '__len__') and pd.isna(answer):
-        return pd.NA, JACCARD_NONE
+        return pd.NA, ERR_NONE
     elif answer == ['_None']:
         answer = []
     elif '_None' in answer:
         answer.remove('_None')
 
     if len(answer) == 0 and len(pred) == 0:
-        return pd.NA, JACCARD_EMPTY_BOTH
+        return pd.NA, ERR_EMPTY_BOTH            # don't count if both empty
     elif len(answer) == 0:
-        return pd.NA, JACCARD_EMPTY_REF
-    elif len(pred) == 0:
-        return 0, JACCARD_EMPTY_PRED
+        return pd.NA, ERR_EMPTY_REF             # don't count if reference empty
+    elif len(pred) == 0:                        
+        return 0, ERR_EMPTY_PRED                # count as failure if prediction empty
 
     pred_size = sum(1 if v else 0 for v in pred.values())
     ans_size = len(answer)
@@ -186,7 +197,7 @@ def f1_by_annotator(test_df, get_prediction, columns=('toxicity', 'counternarrat
 
 
 def f1_majority(test_df, get_prediction,
-    columns=('toxicity', 'counternarrative', 'justInappropriate', 'hasImplication', 'hasOther')
+    columns=('toxicity', 'counternarrative', 'justInappropriate', 'hasImplication', 'hasOther', 'implDetected')
 ):
     """ Only for multi-class """
     COLS = ['st_id', 'st_nr', 'comment_id'] + [f'answer_pp_{c}' for c in columns]
@@ -194,15 +205,15 @@ def f1_majority(test_df, get_prediction,
     def majority_vote(series, default_value=None):
         modes = series.mode()
         if len(modes) == 1:
-            return modes.iloc[0]
+            return modes.iloc[0]        # return the mode
         elif len(modes) == 0:
-            return None
+            return None                 # no annotations for comment
         else:
-            return default_value
+            return default_value        # tie, return default
 
-    result_records = []
-    for lang, lang_df in test_df.groupby('lang'):
-        maj_df = lang_df[COLS].groupby('comment_id').agg({
+    def calc(df, lang="*"):
+        result_records = []
+        maj_df = df[COLS].groupby('comment_id').agg({
             'st_id': 'first',
             'st_nr': 'first',
             'answer_pp_toxicity': partial(majority_vote, default_value='Yes/Maybe'),
@@ -210,16 +221,25 @@ def f1_majority(test_df, get_prediction,
             'answer_pp_justInappropriate': partial(majority_vote, default_value='No'),
             'answer_pp_hasImplication': partial(majority_vote, default_value='[]'),
             'answer_pp_hasOther': partial(majority_vote, default_value="['_No other']"),
+            'answer_pp_implDetected': partial(majority_vote, default_value=False),
         }).reset_index()
         for col in columns:
             predictions = maj_df.apply(
                 lambda row: get_prediction(row['st_id'], row['st_nr'], row['comment_id'], col), axis=1
             )
+            print(f"Predict. values {col}: {predictions.astype(str).unique()}")
             result = _cls_report({'lang': lang, 'annotator': '*', 'column': col}, maj_df, predictions, col)
             if result is None:
                 continue
 
             result_records.extend(result)
+        return result_records
+
+
+    result_records = []
+    for lang, lang_df in test_df.groupby('lang'):
+        result_records.extend(calc(lang_df, lang=lang))
+    result_records.extend(calc(test_df))           
 
     results_df = pd.DataFrame.from_records(result_records)
     return results_df
@@ -233,6 +253,8 @@ def f1_conditional_selection(test_df, get_prediction, condition_score, interval=
     ('implTopic', 'implTopicTokens'),
     ('implPolarity', 'implTopicTokens'),
     ('implTemporality', 'implTopicTokens'),
+    ('implSarcasm', 'implTopicTokens'),
+    ('implStereotype', 'implTopicTokens'),
 )):
     result_records = []
     for eval_col, cond_col in columns:
@@ -257,7 +279,7 @@ def f1_conditional_selection(test_df, get_prediction, condition_score, interval=
         # print(boundaries)
         # boundaries = [i * interval for i in range(int(1 / interval)+1)]
         cond_score_masks += [
-            ((cond_scores[0] >= 0) & (cond_scores[1] != JACCARD_EMPTY_PRED), '>=0.0-non-empty-pred', 0.33)
+            ((cond_scores[0] >= 0) & (cond_scores[1] != ERR_EMPTY_PRED), '>=0.0-non-empty-pred', 0.33)
         ]
         cond_score_masks += [((cond_scores[0] > 0), '> 0.0', 0.66)]
         cond_score_masks += [
