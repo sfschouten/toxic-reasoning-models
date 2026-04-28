@@ -127,7 +127,7 @@ class ToxicReasoningPipeline(Pipeline):
                 'subreddit': subreddit, 'subm_title': subm_title, 'subm_body': subm_body,
                 'comments': [inputs]
             }]
-        elif isinstance(inputs, dict) and 'post_text' in inputs:
+        elif isinstance(inputs, dict) and 'subm_body' in inputs:
             # assume this is a thread of comments
             inputs = [inputs]
 
