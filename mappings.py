@@ -139,7 +139,7 @@ def custom_implonly_generic(pred):
             and pred['authorBelief'] >= 0.5
     inferior_nature = _inferior and  pred['implTopic'] in ['(b)', '(b.1)']
     inferior_behavior = _inferior and pred['implTopic'] == '(c)'
-    _superior = pred['implPolarity'] = 'Positive' \
+    _superior = pred['implPolarity'] == 'Positive' \
             and pred['subject'] in ['another group', 'an individual outside of the conversation',
                     'another participant in the conversation and/or the group they belong to'] \
             and pred['authorBelief'] >= 0.5
