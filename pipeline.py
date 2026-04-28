@@ -63,6 +63,7 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds):
                 (k := 'hasImplication'): binary(k, idx),
                 (k := 'hasOther'): binary(k, idx),
                 (k := 'implPolarity'): mc(k, idx),
+                (k := 'subject'): mc(k, idx),
                 (k := 'implTopic'): mc(k, idx),
                 (k := 'implTemporality'): ml(k, idx),
                 (k := 'implStereotype'): binary(k, idx),
@@ -99,6 +100,9 @@ class ToxicReasoningPipeline(Pipeline):
         if 'comtok_thresholds' in kwargs:
             forward_kwargs['comtok_thresholds'] = kwargs.pop('comtok_thresholds')
 
+        if 'max_length' in kwargs:
+            forward_kwargs['max_length'] = kwargs.pop('max_length')
+
         if 'mapping_functions' in kwargs:
             postprocess_kwargs['mapping_functions'] = kwargs.pop('mapping_functions')
 
@@ -115,7 +119,7 @@ class ToxicReasoningPipeline(Pipeline):
         if isinstance(inputs, str):
             # assume this is a single comment (only the text)
             inputs = [{
-                'st_id': 'subthread1', 'workerid': '',
+                'st_id': 'subthread1',
                 'subreddit': subreddit, 'subm_title': subm_title, 'subm_body': subm_body,
                 'comments': [{'comment_id': 'comment1', 'st_nr': 1, 'comment_body': inputs, 'author_name': author_name}]
             }]
@@ -123,7 +127,7 @@ class ToxicReasoningPipeline(Pipeline):
             # assume this is a single comment (with metadata)
             assert all(field in inputs for field in self.REQUIRED_COMMENT_FIELDS)
             inputs = [{
-                'st_id': 'subthread1', 'workerid': '',
+                'st_id': 'subthread1',
                 'subreddit': subreddit, 'subm_title': subm_title, 'subm_body': subm_body,
                 'comments': [inputs]
             }]
@@ -138,6 +142,10 @@ class ToxicReasoningPipeline(Pipeline):
             for thread_dict in inputs for comment_dict in thread_dict['comments']
         ]
         df = pd.DataFrame.from_records(records)
+
+        if 'workerid' not in df.columns:
+            df['workerid'] = ''
+
         return df
 
     def _forward(self, model_inputs: pd.DataFrame, comtok_thresholds=DEFAULT_COMTOK_THRESHOLDS, max_length=500,

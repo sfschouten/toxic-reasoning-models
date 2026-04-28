@@ -119,3 +119,44 @@ def edos(prediction, attitude_thresholds=LATENT_HATRED_THRESHOLD_DEFAULTS):
         return [OTHER]
 
     return classes
+
+
+def custom_implonly_generic(pred):
+    """
+    
+    """
+    classes = []
+
+    justInappropriate = pred['justInappropriate'] == 'Yes'
+    different = (~pred['implDetected']) & (~justInappropriate) & (pred['toxicity'] == 'Yes/Maybe')
+    intimidation_like = pred['implTopic'] in ['(a)', '(a.1)'] and pred['implPolarity'] == 'Negative' \
+                   and 'future' in pred['implTemporality'] and prediction['authorPrefer'] >= 0.5
+    threat_like = pred['implTopic'] in ['(a)', '(a.1)'] and pred['implPolarity'] == 'Negative' \
+              and 'future' in pred['implTemporality'] and prediction['authorAccount'] >= 0.5
+    _inferior = pred['implPolarity'] == 'Negative' \
+                pred['subject'] in ['another group', 'an individual outside of the conversation',
+                    'another participant in the conversation and/or the group they belong to'] \
+                pred['authorBelief'] >= 0.5
+    inferior_nature = _inferior & pred['implTopic'] in ['(b)', '(b.1)']
+    inferior_behavior = _inferior & pred['implTopic'] == '(c)'
+    _superior = pred['implPolarity'] = 'Positive' \
+                pred['subject'] in ['another group', 'an individual outside of the conversation',
+                    'another participant in the conversation and/or the group they belong to'] \
+                pred['authorBelief'] >= 0.5
+    superior_nature = _superior & pred['implTopic'] == '(b)'
+    superior_behavior = _superior & pred['implTopic'] == '(c)'
+
+    if pred['toxicity'] == 'Yes/Maybe': classes.append('Maybe Toxic')
+    if justInappropriate: classes.append('Just Inappropriate')
+    if different: classes.append('Different kind of toxicity')
+    if intimidation_like: classes.append('Intimidation-like')
+    if threat_like: classes.append('Threat-like')
+    if inferior_nature: classes.append('Subject Inferior Nature')
+    if inferior_behavior: classes.append('Subject Inferior Behavior')
+    if superior_nature: classes.append('Subject Superior Nature')
+    if superior_behavior: classes.append('Subject Superior Behavior')
+    
+    return classes
+
+
+
