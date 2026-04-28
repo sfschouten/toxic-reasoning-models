@@ -84,7 +84,7 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
 
 class ToxicReasoningPipeline(Pipeline):
 
-    REQUIRED_THREAD_FIELDS = ['st_id', 'workerid', 'subreddit', 'subm_title', 'subm_body']
+    REQUIRED_THREAD_FIELDS = ['st_id', 'subreddit', 'subm_title', 'subm_body']
     REQUIRED_COMMENT_FIELDS = ['comment_id', 'st_nr', 'comment_body', 'author_name']
 
     def __init__(self, **kwargs):
