@@ -30,7 +30,7 @@ def collate_fn(items):
     return default_collate([{col: torch.tensor(row[col]) for col in row} for row in items])
 
 
-def convert_comtok_prediction(ids, preds, token_preds, thresholds):
+def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=False):
     def sigmoid(x):
         return 1 / (1 + math.exp(-x))
 
@@ -38,13 +38,16 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds):
         return COLUMNS[key].reverse_map
 
     def binary(key, idx):
+        if detailed: return preds[key][idx]
         return rev_map(key)[0 if sigmoid(preds[key][idx]) < thresholds[key] else 1]
 
     def mc(key, idx):
+        if detailed: return preds[key][idx]
         return rev_map(key)[preds[key][idx].argmax().squeeze().item()]
 
     def ml(key, idx):
         value = preds[key][idx]
+        if detailed: return value
         return [v for p, v in zip(value.tolist(), COLUMNS[key].values) if sigmoid(p) > thresholds[key]]
 
     def prob(key, idx):
@@ -149,7 +152,7 @@ class ToxicReasoningPipeline(Pipeline):
         return df
 
     def _forward(self, model_inputs: pd.DataFrame, comtok_thresholds=DEFAULT_COMTOK_THRESHOLDS, max_length=500,
-                 **kwargs):
+                 detailed=False, **kwargs):
         """
         :param model_inputs: a dataframe with the comments of a number of threads (equal to the batch size)
         :param kwargs:
@@ -187,7 +190,7 @@ class ToxicReasoningPipeline(Pipeline):
             other_preds = {k: v for k, v in preds.items() if not k.endswith('Tokens')}
 
             # finally convert prediction to unified format and return
-            return convert_comtok_prediction(all_ids, other_preds, token_preds, comtok_thresholds)
+            return convert_comtok_prediction(all_ids, other_preds, token_preds, comtok_thresholds, detailed=detailed)
 
         elif toxic_reasoning_style == 'decoder':
             raise NotImplementedError
