@@ -128,7 +128,7 @@ def custom_implonly_generic(pred):
     classes = []
 
     justInappropriate = pred['justInappropriate'] == 'Yes'
-    different = not pred['implDetected'] and not justInappropriate and pred['toxicity'] == 'Yes/Maybe'
+    different = not pred['hasImplication'] and not justInappropriate and pred['toxicity'] == 'Yes/Maybe'
     intimidation_like = pred['implTopic'] in ['(a)', '(a.1)'] and pred['implPolarity'] == 'Negative' \
                    and 'future' in pred['implTemporality'] and prediction['authorPrefer'] >= 0.5
     threat_like = pred['implTopic'] in ['(a)', '(a.1)'] and pred['implPolarity'] == 'Negative' \
