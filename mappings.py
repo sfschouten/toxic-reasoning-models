@@ -128,23 +128,23 @@ def custom_implonly_generic(pred):
     classes = []
 
     justInappropriate = pred['justInappropriate'] == 'Yes'
-    different = (~pred['implDetected']) & (~justInappropriate) & (pred['toxicity'] == 'Yes/Maybe')
+    different = not pred['implDetected'] and not justInappropriate and pred['toxicity'] == 'Yes/Maybe'
     intimidation_like = pred['implTopic'] in ['(a)', '(a.1)'] and pred['implPolarity'] == 'Negative' \
                    and 'future' in pred['implTemporality'] and prediction['authorPrefer'] >= 0.5
     threat_like = pred['implTopic'] in ['(a)', '(a.1)'] and pred['implPolarity'] == 'Negative' \
               and 'future' in pred['implTemporality'] and prediction['authorAccount'] >= 0.5
     _inferior = pred['implPolarity'] == 'Negative' \
-                pred['subject'] in ['another group', 'an individual outside of the conversation',
+            and pred['subject'] in ['another group', 'an individual outside of the conversation',
                     'another participant in the conversation and/or the group they belong to'] \
-                pred['authorBelief'] >= 0.5
-    inferior_nature = _inferior & pred['implTopic'] in ['(b)', '(b.1)']
-    inferior_behavior = _inferior & pred['implTopic'] == '(c)'
+            and pred['authorBelief'] >= 0.5
+    inferior_nature = _inferior and  pred['implTopic'] in ['(b)', '(b.1)']
+    inferior_behavior = _inferior and pred['implTopic'] == '(c)'
     _superior = pred['implPolarity'] = 'Positive' \
-                pred['subject'] in ['another group', 'an individual outside of the conversation',
+            and pred['subject'] in ['another group', 'an individual outside of the conversation',
                     'another participant in the conversation and/or the group they belong to'] \
-                pred['authorBelief'] >= 0.5
-    superior_nature = _superior & pred['implTopic'] == '(b)'
-    superior_behavior = _superior & pred['implTopic'] == '(c)'
+            and pred['authorBelief'] >= 0.5
+    superior_nature = _superior and pred['implTopic'] == '(b)'
+    superior_behavior = _superior and pred['implTopic'] == '(c)'
 
     if pred['toxicity'] == 'Yes/Maybe': classes.append('Maybe Toxic')
     if justInappropriate: classes.append('Just Inappropriate')
