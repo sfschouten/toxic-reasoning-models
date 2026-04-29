@@ -99,7 +99,7 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
             })
         result.append({
             'st_id': st_id, 
-            'preds': comment_preds
+            'preds': comment_preds,
             (k := 'subjectTokens'): tokens(k),
             (k := 'otherTokens'): tokens(k),
             (k := 'implTopicTokens'): tokens(k),
