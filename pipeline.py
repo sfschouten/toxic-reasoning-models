@@ -37,17 +37,20 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
     def rev_map(key):
         return COLUMNS[key].reverse_map
 
-    def binary(key, idx):
-        if detailed: return preds[key][idx]
+    def binary(key, idx, detailed):
+        if detailed: 
+            return preds[key][idx]
         return rev_map(key)[0 if sigmoid(preds[key][idx]) < thresholds[key] else 1]
 
-    def mc(key, idx):
-        if detailed: return preds[key][idx]
+    def mc(key, idx, detailed):
+        if detailed: 
+            return preds[key][idx]
         return rev_map(key)[preds[key][idx].argmax().squeeze().item()]
 
-    def ml(key, idx):
+    def ml(key, idx, detailed):
         value = preds[key][idx]
-        if detailed: return value
+        if detailed: 
+            return value
         return [v for p, v in zip(value.tolist(), COLUMNS[key].values) if sigmoid(p) > thresholds[key]]
 
     def prob(key, idx):
@@ -61,15 +64,15 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
             idx = nr_prev + j
             comment_preds.append({
                 'comment_id': comment_id,
-                (k := 'toxicity'): binary(k, idx),
-                (k := 'justInappropriate'): binary(k, idx),
-                (k := 'hasImplication'): binary(k, idx),
-                (k := 'hasOther'): binary(k, idx),
-                (k := 'implPolarity'): mc(k, idx),
-                (k := 'subject'): mc(k, idx),
-                (k := 'implTopic'): mc(k, idx),
-                (k := 'implTemporality'): ml(k, idx),
-                (k := 'implStereotype'): binary(k, idx),
+                (k := 'toxicity'): binary(k, idx, detailed),
+                (k := 'justInappropriate'): binary(k, idx, detailed),
+                (k := 'hasImplication'): binary(k, idx, detailed),
+                (k := 'hasOther'): binary(k, idx, detailed),
+                (k := 'implPolarity'): mc(k, idx, detailed),
+                (k := 'subject'): mc(k, idx, detailed),
+                (k := 'implTopic'): mc(k, idx, detailed),
+                (k := 'implTemporality'): ml(k, idx, detailed),
+                (k := 'implStereotype'): binary(k, idx, detailed),
                 (k := 'authorBelief'): prob(k, idx),
                 (k := 'authorPrefer'): prob(k, idx),
                 (k := 'authorAccount'): prob(k, idx),
@@ -177,7 +180,7 @@ class ToxicReasoningPipeline(Pipeline):
             by_thread_df = test_thread_df.drop(columns=['ids', 'st_id'])
             dataset = Dataset.from_pandas(by_thread_df)
             tok_func = partial(comtok_tokenize_func,
-                               tokenizer=self.tokenizer, max_length=max_length, include_labels=False, detailed=detailed)
+                               tokenizer=self.tokenizer, max_length=max_length, include_labels=False)
             tokenized = dataset.map(tok_func, batched=True).remove_columns(['text'])
             dataloader = DataLoader(tokenized, batch_size=len(tokenized), collate_fn=collate_fn)
             batches = list(dataloader)
