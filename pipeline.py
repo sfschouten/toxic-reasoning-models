@@ -18,11 +18,15 @@ from models.data import COLUMNS, comtok_create_thread_text, comtok_tokenize_func
 
 DEFAULT_COMTOK_THRESHOLDS = MappingProxyType({
     'toxicity': 0.3,
+    'counternarrative': 0.5,
     'justInappropriate': 0.5,
     'hasImplication': 0.3,
     'hasOther': 0.5,
     'implTemporality': 0.5,
     'implStereotype': 0.5,
+    'implSarcasm': 0.5,
+    'subjectGroupType': 0.5,
+    'otherGroupType': 0.5,
 })
 
 
@@ -68,14 +72,19 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
             comment_preds.append({
                 'comment_id': comment_id,
                 (k := 'toxicity'): binary(k, idx, detailed),
+                (k := 'counternarrative'): binary(k, idx, detailed),
                 (k := 'justInappropriate'): binary(k, idx, detailed),
                 (k := 'hasImplication'): binary(k, idx, detailed),
                 (k := 'hasOther'): binary(k, idx, detailed),
                 (k := 'implPolarity'): mc(k, idx, detailed),
                 (k := 'subject'): mc(k, idx, detailed),
+                (k := 'subjectGroupType'): ml(k, idx, detailed),
+                (k := 'other'): mc(k, idx, detailed),
+                (k := 'otherGroupType'): ml(k, idx, detailed),
                 (k := 'implTopic'): mc(k, idx, detailed),
                 (k := 'implTemporality'): ml(k, idx, detailed),
                 (k := 'implStereotype'): binary(k, idx, detailed),
+                (k := 'implSarcasm'): binary(k, idx, detailed),
                 (k := 'authorBelief'): prob(k, idx),
                 (k := 'authorPrefer'): prob(k, idx),
                 (k := 'authorAccount'): prob(k, idx),
