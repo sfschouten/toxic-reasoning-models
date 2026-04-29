@@ -199,23 +199,26 @@ class ToxicReasoningPipeline(Pipeline):
             other_preds = {k: v for k, v in preds.items() if not k.endswith('Tokens')}
 
             # finally convert prediction to unified format and return
-            return convert_comtok_prediction(all_ids, other_preds, token_preds, comtok_thresholds, detailed=detailed)
+            pred_w_detail = convert_comtok_prediction(all_ids, other_preds, token_preds, comtok_thresholds, detailed=True) if detailed else None
+            pred = convert_comtok_prediction(all_ids, other_preds, token_preds, comtok_thresholds, detailed=False)
+            return pred, pred_w_detail
 
         elif toxic_reasoning_style == 'decoder':
             raise NotImplementedError
 
     def postprocess(self, model_outputs, mapping_functions=MappingProxyType({})):
+        model_preds, model_preds_detail = model_outputs
         mapping_outputs = {}
         for name, map_func in mapping_functions.items():
             map_results = []
-            for st_model_out in model_outputs:
+            for st_model_out in model_preds:
                 mapped_comments = []
                 for comment_pred in st_model_out['preds']:
                     mapped_comments.append(map_func(comment_pred))
                 map_results.append({'st_id': st_model_out['st_id'], 'classes': mapped_comments})
             mapping_outputs[name] = map_results
 
-        return model_outputs, mapping_outputs
+        return model_preds, model_preds_detail, mapping_outputs
 
 
 if __name__ == "__main__":
