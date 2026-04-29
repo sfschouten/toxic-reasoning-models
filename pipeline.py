@@ -26,6 +26,9 @@ DEFAULT_COMTOK_THRESHOLDS = MappingProxyType({
     'implStereotype': 0.5,
     'implSarcasm': 0.5,
     'subjectGroupType': 0.5,
+    'subjectTokens': 0.5,
+    'otherTokens': 0.5,
+    'implTopicTokens': 0.5,
 })
 
 
@@ -62,6 +65,10 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
     def prob(key, idx):
         return sigmoid(preds[key][idx].item())
 
+    def tokens(key):
+        probs = token_preds[k].sigmoid().tolist()
+        return [i for i,p in enumerate(probs) if p > ]
+
     result = []
     for i, (st_id, comment_ids) in enumerate(ids):
         nr_prev = sum(len(c_ids) for _, c_ids in ids[:i])
@@ -89,11 +96,14 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
                 (k := 'typicalBelief'): prob(k, idx),
                 (k := 'typicalPrefer'): prob(k, idx),
                 (k := 'expertBelief'): prob(k, idx),
-                (k := 'subjectTokens'): token_preds[k][idx].sigmoid().tolist(),
-                (k := 'otherTokens'): token_preds[k][idx].sigmoid().tolist(),
-                (k := 'implTopicTokens'): token_preds[k][idx].sigmoid().tolist(),
             })
-        result.append({'st_id': st_id, 'preds': comment_preds})
+        result.append({
+            'st_id': st_id, 
+            'preds': comment_preds
+            (k := 'subjectTokens'): tokens(k),
+            (k := 'otherTokens'): tokens(k),
+            (k := 'implTopicTokens'): tokens(k),
+        })
 
     return result
 
