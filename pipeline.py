@@ -26,7 +26,6 @@ DEFAULT_COMTOK_THRESHOLDS = MappingProxyType({
     'implStereotype': 0.5,
     'implSarcasm': 0.5,
     'subjectGroupType': 0.5,
-    'otherGroupType': 0.5,
 })
 
 
@@ -80,7 +79,6 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
                 (k := 'subject'): mc(k, idx, detailed),
                 (k := 'subjectGroupType'): ml(k, idx, detailed),
                 (k := 'other'): mc(k, idx, detailed),
-                (k := 'otherGroupType'): ml(k, idx, detailed),
                 (k := 'implTopic'): mc(k, idx, detailed),
                 (k := 'implTemporality'): ml(k, idx, detailed),
                 (k := 'implStereotype'): binary(k, idx, detailed),
