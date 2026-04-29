@@ -177,7 +177,7 @@ class ToxicReasoningPipeline(Pipeline):
             by_thread_df = test_thread_df.drop(columns=['ids', 'st_id'])
             dataset = Dataset.from_pandas(by_thread_df)
             tok_func = partial(comtok_tokenize_func,
-                               tokenizer=self.tokenizer, max_length=max_length, include_labels=False)
+                               tokenizer=self.tokenizer, max_length=max_length, include_labels=False, detailed=detailed)
             tokenized = dataset.map(tok_func, batched=True).remove_columns(['text'])
             dataloader = DataLoader(tokenized, batch_size=len(tokenized), collate_fn=collate_fn)
             batches = list(dataloader)
