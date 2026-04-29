@@ -91,7 +91,7 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
                 (k := 'expertBelief'): prob(k, idx),
                 (k := 'subjectTokens'): token_preds[k][idx].sigmoid().tolist(),
                 (k := 'otherTokens'): token_preds[k][idx].sigmoid().tolist(),
-                (k := 'implTokens'): token_preds[k][idx].sigmoid().tolist(),
+                (k := 'implTopicTokens'): token_preds[k][idx].sigmoid().tolist(),
             })
         result.append({'st_id': st_id, 'preds': comment_preds})
 
