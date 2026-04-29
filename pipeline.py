@@ -67,7 +67,7 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
 
     def tokens(key):
         probs = token_preds[k].sigmoid().tolist()
-        return [i for i,p in enumerate(probs) if p > ]
+        return [i for i,p in enumerate(probs) if p > thresholds[key]]
 
     result = []
     for i, (st_id, comment_ids) in enumerate(ids):
