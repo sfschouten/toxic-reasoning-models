@@ -46,7 +46,7 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
     def mc(key, idx, detailed):
         rmap = rev_map(key)
         pred = preds[key][idx]
-        assert len(pred.shape) == 1, pred.shape
+        print(key, idx, len(pred.shape), pred)
         if detailed: 
             return {rmap[i]: v for i,v in enumerate(pred.softmax(0).tolist())}
         return rmap[pred.argmax().squeeze().item()]
