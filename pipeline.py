@@ -109,6 +109,9 @@ class ToxicReasoningPipeline(Pipeline):
         if 'max_length' in kwargs:
             forward_kwargs['max_length'] = kwargs.pop('max_length')
 
+        if 'detailed' in kwargs:
+            forward_kwargs['detailed'] = kwargs.pop('detailed')
+
         if 'mapping_functions' in kwargs:
             postprocess_kwargs['mapping_functions'] = kwargs.pop('mapping_functions')
 
