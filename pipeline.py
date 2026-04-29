@@ -38,19 +38,21 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
         return COLUMNS[key].reverse_map
 
     def binary(key, idx, detailed):
+        prob = preds[key][idx].sigmoid().item()
         if detailed: 
-            return preds[key][idx]
-        return rev_map(key)[0 if sigmoid(preds[key][idx]) < thresholds[key] else 1]
+            return prob
+        return rev_map(key)[0 if prob < thresholds[key] else 1]
 
     def mc(key, idx, detailed):
+        rmap = rev_map(key)
         if detailed: 
-            return preds[key][idx]
-        return rev_map(key)[preds[key][idx].argmax().squeeze().item()]
+            return {rmap[i]: v for i,v in enumerate(preds[key][idx].softmax().tolist())}
+        return rmap[preds[key][idx].argmax().squeeze().item()]
 
     def ml(key, idx, detailed):
         value = preds[key][idx]
         if detailed: 
-            return value
+            return {v: p for p, v in zip(value.tolist(), COLUMNS[key].values)}
         return [v for p, v in zip(value.tolist(), COLUMNS[key].values) if sigmoid(p) > thresholds[key]]
 
     def prob(key, idx):
