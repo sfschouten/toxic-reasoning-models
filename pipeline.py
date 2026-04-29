@@ -52,7 +52,7 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
     def ml(key, idx, detailed):
         value = preds[key][idx]
         if detailed: 
-            return {v: p for p, v in zip(value.tolist(), COLUMNS[key].values)}
+            return {v: p for p, v in zip(value.sigmoid().tolist(), COLUMNS[key].values)}
         return [v for p, v in zip(value.tolist(), COLUMNS[key].values) if sigmoid(p) > thresholds[key]]
 
     def prob(key, idx):
