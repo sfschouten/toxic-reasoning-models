@@ -37,6 +37,9 @@ def collate_fn(items):
 
 
 def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=False):
+    """
+    preds:     dict[str, torch.Tensor] 
+    """
     def sigmoid(x):
         return 1 / (1 + math.exp(-x))
 
@@ -51,7 +54,12 @@ def convert_comtok_prediction(ids, preds, token_preds, thresholds, detailed=Fals
 
     def mc(key, idx, detailed):
         rmap = rev_map(key)
-        pred = preds[key][idx].squeeze()
+        pred = preds[key][idx]
+        print(pred.shape)
+        pred = pred.squeeze()
+        print(pred.shape)
+        print(pred.softmax(0))
+        print(pred.softmax(0).tolist())
         if detailed: 
             return {rmap[i]: v for i,v in enumerate(pred.softmax(0).tolist())}
         return rmap[pred.argmax().item()]
